@@ -84,7 +84,8 @@ func main() {
 			fmt.Printf(", inflight=%s @%d/%d", resume.Inflight.Cell.ID, resume.Inflight.TrainOffset, len(split.Train))
 		}
 		fmt.Println()
-		printBests("  checkpoint bests", resume.Best)
+		printBests("  checkpoint bests (raw)", resume.Best)
+		printMobile("  checkpoint bests (mobile = metric/MiB)", resume.BestMobile)
 	} else {
 		fmt.Printf("  epoch %d — fresh sweep\n", epoch)
 	}
@@ -117,15 +118,27 @@ func main() {
 	}
 
 	live := tr.Snapshot()
-	printBests("\n── Best (3 metrics + Score) ──", live.Best)
-	fmt.Println("\n── Leaderboard (top by Lucy Score) ──")
+	printBests("\n── Best raw (3 metrics + Score) ──", live.Best)
+	printMobile("\n── Best mobile (metric / MiB) ──", live.BestMobile)
+	fmt.Println("\n── Leaderboard raw (Lucy Score) ──")
 	for i, r := range live.Leaderboard {
 		if i >= 15 {
 			break
 		}
 		s := r.Snapshot
-		fmt.Printf("%2d  [e%d] %-42s  score=%7.3f  acc=%5.1f  thru=%7.1f  avail=%5.1f  %s\n",
-			i+1, r.Epoch, r.Cell.ID, s.Score, s.AvgAccuracy, s.Throughput, s.Availability, r.Status)
+		fmt.Printf("%2d  [e%d] %-42s  score=%7.3f  acc=%5.1f  thru=%7.1f  avail=%5.1f  %6.1fKiB  %s\n",
+			i+1, r.Epoch, r.Cell.ID, s.Score, s.AvgAccuracy, s.Throughput, s.Availability,
+			float64(s.WeightBytes)/1024, r.Status)
+	}
+	fmt.Println("\n── Leaderboard mobile (Score / MiB) ──")
+	for i, r := range live.LeaderboardMobile {
+		if i >= 15 {
+			break
+		}
+		s := r.Snapshot
+		fmt.Printf("%2d  [e%d] %-42s  score/MiB=%8.2f  score=%7.3f  acc=%5.1f  %6.1fKiB  %s\n",
+			i+1, r.Epoch, r.Cell.ID, s.MobileScore, s.Score, s.AvgAccuracy,
+			float64(s.WeightBytes)/1024, r.Status)
 	}
 	if ctx.Err() != nil {
 		fmt.Printf("\nStopped — progress saved under %s (re-run to resume mid-epoch).\n", *ckptDir)
@@ -150,6 +163,24 @@ func printBestLine(name string, r *pulse.Result) {
 		return
 	}
 	s := r.Snapshot
-	fmt.Printf("  %-12s  %s  score=%.3f acc=%.1f thru=%.1f avail=%.1f\n",
-		name, r.Cell.ID, s.Score, s.AvgAccuracy, s.Throughput, s.Availability)
+	fmt.Printf("  %-12s  %s  score=%.3f acc=%.1f thru=%.1f avail=%.1f  (%.1f KiB)\n",
+		name, r.Cell.ID, s.Score, s.AvgAccuracy, s.Throughput, s.Availability, float64(s.WeightBytes)/1024)
+}
+
+func printMobile(title string, b pulse.BestMobile) {
+	fmt.Println(title)
+	printMobileLine("score", b.Score, func(s pulse.Result) float64 { return s.Snapshot.MobileScore })
+	printMobileLine("throughput", b.Throughput, func(s pulse.Result) float64 { return s.Snapshot.MobileThroughput })
+	printMobileLine("availability", b.Availability, func(s pulse.Result) float64 { return s.Snapshot.MobileAvailability })
+	printMobileLine("accuracy", b.Accuracy, func(s pulse.Result) float64 { return s.Snapshot.MobileAccuracy })
+}
+
+func printMobileLine(name string, r *pulse.Result, eff func(pulse.Result) float64) {
+	if r == nil {
+		fmt.Printf("  %-12s  —\n", name)
+		return
+	}
+	s := r.Snapshot
+	fmt.Printf("  %-12s  %s  eff=%.3f/MiB  raw score=%.3f acc=%.1f thru=%.1f  (%.1f KiB)\n",
+		name, r.Cell.ID, eff(*r), s.Score, s.AvgAccuracy, s.Throughput, float64(s.WeightBytes)/1024)
 }

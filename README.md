@@ -50,7 +50,8 @@ Every minute (configurable) tide writes:
 - `checkpoint/progress.json` — completed cells, Lucy scores, **best score / throughput / availability / accuracy**, inflight cell state  
 - `checkpoint/history.json` — full pulse timeline for the dashboard (refresh / other machines)  
 - `checkpoint/models/inflight/` — current cell weights (cnn1/cnn2/head `.bin`)  
-- `checkpoint/models/best_{score,throughput,availability,accuracy}/` — best models per axis  
+- `checkpoint/models/best_{score,throughput,availability,accuracy}/` — best raw models per axis  
+- `checkpoint/models/best_mobile_{score,throughput,availability,accuracy}/` — best **metric/MiB** (mobile)  
 - `checkpoint/models/<cell_id>/` — finished cell weights  
 
 Stop (Ctrl+C) and re-run the same command to resume from the next unfinished cell (or mid-cell inflight). Use `-fresh` to wipe resume state (delete `checkpoint/` manually if you want a clean slate on disk).
