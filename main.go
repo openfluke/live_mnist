@@ -1,7 +1,7 @@
 // live_mnist — 80/20 MNIST adaptation sweep via tide + Welvet.
 //
-// Architecture: input → CNN2 → CNN2 → Dense → 10
-// Score: Throughput × Availability% × AvgAccuracy% / 10_000  (Lucy dense equation)
+// Default: each permutation trains one full epoch over the 80% train split.
+// Re-run after a finished sweep starts epoch N+1 (weights continue).
 package main
 
 import (
@@ -24,21 +24,22 @@ import (
 
 func main() {
 	addr := flag.String("addr", ":8080", "dashboard listen address")
-	mode := flag.String("mode", "smoke", "permutation set: smoke | kquant | full")
+	mode := flag.String("mode", "full", "permutation set: full | smoke | kquant (default: full matrix)")
 	dataDir := flag.String("data", "data", "MNIST cache directory")
 	ckptDir := flag.String("ckpt", "checkpoint", "progress + model checkpoint directory")
 	batch := flag.Int("batch", 4, "permutations per dashboard batch")
 	micro := flag.Int("micro", 8, "MNIST micro-batch size")
-	cellSec := flag.Int("cell-sec", 12, "seconds per permutation cell")
 	ckptSec := flag.Int("ckpt-sec", 60, "seconds between model/score checkpoints")
 	lr := flag.Float64("lr", 0.02, "learning rate")
-	fresh := flag.Bool("fresh", false, "ignore existing checkpoint and start clean")
+	fresh := flag.Bool("fresh", false, "ignore existing checkpoint and start clean at epoch 1")
 	flag.Parse()
 
 	fmt.Println("════════════════════════════════════════════════════════════")
 	fmt.Println(" live_mnist — tide × Welvet mid-stream adaptation")
 	fmt.Println(" input → cnn2 → cnn2 → dense → 10")
 	fmt.Println(" Score = Throughput × Availability% × AvgAccuracy% / 10_000")
+	fmt.Println(" Default: full dtype × quant × train-mode matrix")
+	fmt.Println("          1 epoch over 80% train per permutation")
 	fmt.Println("════════════════════════════════════════════════════════════")
 	fmt.Printf(" SIMD linked: %v\n", simd.Enabled())
 	fmt.Printf(" Dashboard:   http://127.0.0.1%s\n", *addr)
@@ -51,7 +52,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Printf("  train=%d  val=%d  test=%d\n\n", len(split.Train), len(split.Val), len(split.Test))
+	fmt.Printf("  train=%d  val=%d  test=%d\n", len(split.Train), len(split.Val), len(split.Test))
+	fmt.Printf("  → each cell trains until all %d train examples are seen once\n\n", len(split.Train))
 
 	var pcfg permute.Config
 	switch *mode {
@@ -73,17 +75,18 @@ func main() {
 			fmt.Fprintln(os.Stderr, "checkpoint load:", err)
 			os.Exit(1)
 		}
-		if resume != nil {
-			if resume.Mode != "" && resume.Mode != *mode {
-				fmt.Printf("  warning: checkpoint mode=%q != -mode %q (still resuming)\n", resume.Mode, *mode)
-			}
-			fmt.Printf("  resumed: %d completed, next=%d", len(resume.Completed), resume.NextCellIndex)
-			if resume.Inflight != nil {
-				fmt.Printf(", inflight=%s (%.1fs elapsed)", resume.Inflight.Cell.ID, float64(resume.Inflight.ElapsedNS)/1e9)
-			}
-			fmt.Println()
-			printBests("  checkpoint bests", resume.Best)
+	}
+	epoch, resume := checkpoint.PrepareEpoch(resume, cells)
+	if resume != nil {
+		done := checkpoint.DoneSet(resume)
+		fmt.Printf("  epoch %d — resumed: %d/%d cells done", epoch, len(done), len(cells))
+		if resume.Inflight != nil {
+			fmt.Printf(", inflight=%s @%d/%d", resume.Inflight.Cell.ID, resume.Inflight.TrainOffset, len(split.Train))
 		}
+		fmt.Println()
+		printBests("  checkpoint bests", resume.Best)
+	} else {
+		fmt.Printf("  epoch %d — fresh sweep\n", epoch)
 	}
 
 	tr := pulse.New()
@@ -96,7 +99,7 @@ func main() {
 
 	cfg := runner.DefaultConfig(cells)
 	cfg.BatchSize = *batch
-	cfg.CellDuration = time.Duration(*cellSec) * time.Second
+	cfg.Epoch = epoch
 	cfg.CheckpointEvery = time.Duration(*ckptSec) * time.Second
 	cfg.LR = *lr
 	cfg.Store = store
@@ -107,7 +110,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	fmt.Println("Running adaptation sweep — open the dashboard to watch pulses.")
+	fmt.Printf("Running epoch %d — open the dashboard to watch pulses.\n", epoch)
 	if err := runner.Run(ctx, cfg, ds, tr); err != nil && ctx.Err() == nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -121,14 +124,15 @@ func main() {
 			break
 		}
 		s := r.Snapshot
-		fmt.Printf("%2d  %-48s  score=%7.3f  acc=%5.1f  thru=%7.1f  avail=%5.1f  %s\n",
-			i+1, r.Cell.ID, s.Score, s.AvgAccuracy, s.Throughput, s.Availability, r.Status)
+		fmt.Printf("%2d  [e%d] %-42s  score=%7.3f  acc=%5.1f  thru=%7.1f  avail=%5.1f  %s\n",
+			i+1, r.Epoch, r.Cell.ID, s.Score, s.AvgAccuracy, s.Throughput, s.Availability, r.Status)
 	}
 	if ctx.Err() != nil {
-		fmt.Printf("\nStopped — progress saved under %s (re-run to resume).\n", *ckptDir)
+		fmt.Printf("\nStopped — progress saved under %s (re-run to resume mid-epoch).\n", *ckptDir)
 		return
 	}
-	fmt.Println("\nDone. Dashboard still serving — Ctrl+C to exit.")
+	fmt.Printf("\nEpoch %d complete. Re-run `go run .` for epoch %d (weights continue).\n", epoch, epoch+1)
+	fmt.Println("Dashboard still serving — Ctrl+C to exit.")
 	<-ctx.Done()
 }
 

@@ -25,20 +25,23 @@ Mid-stream flip: phase **A** (normal labels) → **B** (`label = (label+5)%10`) 
 ## Run
 
 ```bash
-go run . -addr :8080 -mode smoke
+go run . -addr :8080
 # open http://127.0.0.1:8080
+# default -mode full = all dtypes × all packs/k-quants × all train modes
 ```
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `-mode` | `smoke` | `smoke` \| `kquant` \| `full` |
-| `-cell-sec` | `12` | wall time per dtype×format×mode cell |
+| `-mode` | `full` | `full` \| `smoke` \| `kquant` |
 | `-batch` | `4` | permutations per dashboard batch |
 | `-micro` | `8` | MNIST micro-batch |
 | `-data` | `data` | MNIST download cache |
 | `-ckpt` | `checkpoint` | progress + model weights |
 | `-ckpt-sec` | `60` | save scores + inflight model every N seconds |
-| `-fresh` | off | ignore checkpoint and start clean |
+| `-fresh` | off | ignore checkpoint and start clean at epoch 1 |
+
+**Default:** each permutation trains **one full epoch** over the 80% train split (all 48k examples once).  
+Re-run after the sweep finishes → **epoch N+1** (loads prior cell weights). Ctrl+C mid-epoch resumes at the saved train offset.
 
 ### Checkpoint / resume
 
@@ -58,9 +61,9 @@ Dashboard loads **server history** on every poll — refresh or open from anothe
 
 `sgd`, `step_sgd`, `tween`, `tween_chain`, `step_tween`, `step_tween_chain` (+ `_simd` each), plus `tween_head` baselines — crossed with dtypes/quants.
 
-`smoke` = few dtypes/packs × **all** those modes.  
-`kquant` = Q2_K…Q6_K × Lucy modes.  
-`full` = all dtypes × all packs × all modes (long).
+`full` (default) = all 34 dtypes × all Welvet packs/k-quants × all train modes.  
+`smoke` = few dtypes/packs × all modes (quick check).  
+`kquant` = Q2_K…Q6_K × Lucy modes only.
 
 ## Stack
 
