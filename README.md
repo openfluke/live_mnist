@@ -45,15 +45,22 @@ go run . -addr :8080 -mode smoke
 Every minute (configurable) tide writes:
 
 - `checkpoint/progress.json` — completed cells, Lucy scores, **best score / throughput / availability / accuracy**, inflight cell state  
+- `checkpoint/history.json` — full pulse timeline for the dashboard (refresh / other machines)  
 - `checkpoint/models/inflight/` — current cell weights (cnn1/cnn2/head `.bin`)  
 - `checkpoint/models/best_{score,throughput,availability,accuracy}/` — best models per axis  
 - `checkpoint/models/<cell_id>/` — finished cell weights  
 
 Stop (Ctrl+C) and re-run the same command to resume from the next unfinished cell (or mid-cell inflight). Use `-fresh` to wipe resume state (delete `checkpoint/` manually if you want a clean slate on disk).
 
-`smoke` covers a few dtypes + classic/k-quants × SGD/tween_head × SIMD.  
-`kquant` sweeps Q2_K…Q6_K.  
-`full` expands Welvet's full dtype × format matrix (long).
+Dashboard loads **server history** on every poll — refresh or open from another machine and you still see the chart + can scrub back in time.
+
+### Train modes (Lucy suite)
+
+`sgd`, `step_sgd`, `tween`, `tween_chain`, `step_tween`, `step_tween_chain` (+ `_simd` each), plus `tween_head` baselines — crossed with dtypes/quants.
+
+`smoke` = few dtypes/packs × **all** those modes.  
+`kquant` = Q2_K…Q6_K × Lucy modes.  
+`full` = all dtypes × all packs × all modes (long).
 
 ## Stack
 
