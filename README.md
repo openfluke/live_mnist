@@ -25,8 +25,9 @@ Mid-stream flip: phase **A** (normal labels) → **B** (`label = (label+5)%10`) 
 ## Run
 
 ```bash
-go run . -addr :8080
-# open http://127.0.0.1:8080
+go run . -addr 0.0.0.0:8080
+# local:  http://127.0.0.1:8080
+# remote: http://<host-lan-ip>:8080
 # default -mode full = all dtypes × all packs/k-quants × all train modes
 ```
 

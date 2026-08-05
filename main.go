@@ -8,8 +8,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -23,7 +25,7 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", ":8080", "dashboard listen address")
+	addr := flag.String("addr", "0.0.0.0:8080", "dashboard listen address (0.0.0.0 = all interfaces)")
 	mode := flag.String("mode", "full", "permutation set: full | smoke | kquant (default: full matrix)")
 	dataDir := flag.String("data", "data", "MNIST cache directory")
 	ckptDir := flag.String("ckpt", "checkpoint", "progress + model checkpoint directory")
@@ -42,7 +44,7 @@ func main() {
 	fmt.Println("          1 epoch over 80% train per permutation")
 	fmt.Println("════════════════════════════════════════════════════════════")
 	fmt.Printf(" SIMD linked: %v\n", simd.Enabled())
-	fmt.Printf(" Dashboard:   http://127.0.0.1%s\n", *addr)
+	fmt.Printf(" Dashboard:   %s\n", dashURLs(*addr))
 	fmt.Printf(" Mode:        %s\n", *mode)
 	fmt.Printf(" Checkpoint:  %s (every %ds)\n\n", *ckptDir, *ckptSec)
 
@@ -183,4 +185,66 @@ func printMobileLine(name string, r *pulse.Result, eff func(pulse.Result) float6
 	s := r.Snapshot
 	fmt.Printf("  %-12s  %s  eff=%.3f/MiB  raw score=%.3f acc=%.1f thru=%.1f  (%.1f KiB)\n",
 		name, r.Cell.ID, eff(*r), s.Score, s.AvgAccuracy, s.Throughput, float64(s.WeightBytes)/1024)
+}
+
+// dashURLs prints local + LAN URLs when bound on all interfaces.
+func dashURLs(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		// bare ":8080"
+		if strings.HasPrefix(addr, ":") {
+			host, port = "", strings.TrimPrefix(addr, ":")
+		} else {
+			return "http://" + addr
+		}
+	}
+	if port == "" {
+		port = "8080"
+	}
+	all := host == "" || host == "0.0.0.0" || host == "::"
+	if !all {
+		return "http://" + net.JoinHostPort(host, port)
+	}
+	lines := []string{
+		fmt.Sprintf("http://127.0.0.1:%s  (local)", port),
+		fmt.Sprintf("listening on 0.0.0.0:%s — remote: http://<this-host-ip>:%s", port, port),
+	}
+	if ip := firstLANIPv4(); ip != "" {
+		lines = append(lines, fmt.Sprintf("http://%s:%s  (LAN)", ip, port))
+	}
+	return strings.Join(lines, "\n              ")
+}
+
+func firstLANIPv4() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			var ip net.IP
+			switch v := a.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() {
+				continue
+			}
+			ip = ip.To4()
+			if ip == nil {
+				continue
+			}
+			return ip.String()
+		}
+	}
+	return ""
 }
