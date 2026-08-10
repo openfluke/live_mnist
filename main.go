@@ -93,7 +93,7 @@ func main() {
 	}
 
 	tr := pulse.New()
-	srv := &dash.Server{Tracker: tr, Addr: *addr}
+	srv := &dash.Server{Tracker: tr, Cells: cells, Addr: *addr}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
 			fmt.Fprintln(os.Stderr, "dash:", err)
