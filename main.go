@@ -34,6 +34,7 @@ func main() {
 	ckptSec := flag.Int("ckpt-sec", 60, "seconds between model/score checkpoints")
 	lr := flag.Float64("lr", 0.02, "learning rate")
 	fresh := flag.Bool("fresh", false, "ignore existing checkpoint and start clean at epoch 1")
+	autostart := flag.Bool("autostart", false, "start training immediately (skip dashboard Start button)")
 	flag.Parse()
 
 	fmt.Println("════════════════════════════════════════════════════════════")
@@ -113,7 +114,25 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	fmt.Printf("Running epoch %d — open the dashboard to watch pulses.\n", epoch)
+	// Load boards first so the dash shows metrics while paused.
+	doneN := len(checkpoint.DoneSet(resume))
+	runner.Hydrate(tr, cfg, fmt.Sprintf(
+		"paused — epoch %d — %d/%d done — press Start on dashboard",
+		epoch, doneN, len(cells)))
+
+	if *autostart {
+		srv.SignalStart()
+		fmt.Printf("Autostart — running epoch %d.\n", epoch)
+	} else {
+		fmt.Printf("Dashboard ready (epoch %d) — open it and press Start to begin training.\n", epoch)
+		fmt.Printf("  (or re-run with -autostart)\n")
+		if err := srv.AwaitStart(ctx); err != nil {
+			fmt.Printf("\nStopped before start — checkpoint unchanged under %s.\n", *ckptDir)
+			return
+		}
+		fmt.Printf("Start pressed — running epoch %d.\n", epoch)
+	}
+
 	if err := runner.Run(ctx, cfg, ds, tr); err != nil && ctx.Err() == nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
