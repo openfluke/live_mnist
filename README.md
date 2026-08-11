@@ -29,7 +29,9 @@ winner column.
 ## Lucy / test41 formulas
 
 ```
-SoftAcc      = 100 × (1 − |true_class_logit − 1| / 0.10)   (test41 SoftAcc)
+SoftAcc      = SoftAcc on true-class softmax prob vs 1.0 (scale 1 → ≈100×p)
+             // sine test41 uses scale 0.10 on continuous [0,1] targets; raw logits vs 1.0
+             // wrongly zeroed SoftAcc (and Score) while Hard Acc was already high
 Availability = InferMs / (InferMs + TrainMs) × 100
 Score        = Throughput × Availability × SoftAcc / 10_000
 MobileScore  = Score / WeightMiB
