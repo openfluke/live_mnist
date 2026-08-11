@@ -38,10 +38,11 @@ func main() {
 	flag.Parse()
 
 	fmt.Println("════════════════════════════════════════════════════════════")
-	fmt.Println(" live_mnist — tide × Welvet mid-stream adaptation")
-	fmt.Println(" input → cnn2 → cnn2 → dense → 10")
-	fmt.Println(" Score = Throughput × Availability% × AvgAccuracy% / 10_000")
-	fmt.Println(" Default: full dtype × quant × train-mode matrix")
+	fmt.Println(" live_mnist — tide × Welvet mid-stream adaptation @ SIMD")
+	fmt.Println(" arch: cnn | bicameral · modes: sgd/step/tween… (no tween_head)")
+	fmt.Println(" Score = Throughput × Availability × SoftAcc / 10_000")
+	fmt.Println(" Availability = InferMs / (InferMs + TrainMs)")
+	fmt.Println(" Default: full dtype × quant × mode × arch matrix")
 	fmt.Println("          1 epoch over 80% train per permutation")
 	fmt.Println("════════════════════════════════════════════════════════════")
 	fmt.Printf(" SIMD linked: %v\n", simd.Enabled())
@@ -147,9 +148,9 @@ func main() {
 			break
 		}
 		s := r.Snapshot
-		fmt.Printf("%2d  [e%d] %-42s  score=%7.3f  acc=%5.1f  thru=%7.1f  avail=%5.1f  %6.1fKiB  %s\n",
-			i+1, r.Epoch, r.Cell.ID, s.Score, s.AvgAccuracy, s.Throughput, s.Availability,
-			float64(s.WeightBytes)/1024, r.Status)
+		fmt.Printf("%2d  [e%d] %-48s  score=%7.3f  soft=%5.1f  hard=%5.1f  thru=%7.1f  avail=%5.1f  adapt=%5.1f  %6.1fKiB  %s\n",
+			i+1, r.Epoch, r.Cell.ID, s.Score, s.SoftAcc, s.AvgAccuracy, s.Throughput, s.Availability,
+			s.AdaptPct, float64(s.WeightBytes)/1024, r.Status)
 	}
 	fmt.Println("\n── Leaderboard mobile (Score / MiB) ──")
 	for i, r := range live.LeaderboardMobile {
@@ -184,8 +185,8 @@ func printBestLine(name string, r *pulse.Result) {
 		return
 	}
 	s := r.Snapshot
-	fmt.Printf("  %-12s  %s  score=%.3f acc=%.1f thru=%.1f avail=%.1f  (%.1f KiB)\n",
-		name, r.Cell.ID, s.Score, s.AvgAccuracy, s.Throughput, s.Availability, float64(s.WeightBytes)/1024)
+	fmt.Printf("  %-12s  %s  score=%.3f soft=%.1f hard=%.1f thru=%.1f avail=%.1f adapt=%.1f  (%.1f KiB)\n",
+		name, r.Cell.ID, s.Score, s.SoftAcc, s.AvgAccuracy, s.Throughput, s.Availability, s.AdaptPct, float64(s.WeightBytes)/1024)
 }
 
 func printMobile(title string, b pulse.BestMobile) {

@@ -1,9 +1,49 @@
 # live_mnist
 
-Live mid-stream adaptation benchmark on **MNIST 80/20**, driven by [`tide`](../tide) on Welvet.
+Live mid-stream adaptation benchmark on **MNIST 80/20**, driven by [`tide`](../tide)
+on Welvet. Measuring aligned with
+[`test41_w_sine_ada_perm`](../loom/arcagitesting/test41_w_sine_ada_perm).
+
+---
+
+## What you are measuring
+
+Not “best static MNIST accuracy.” Which **dtype × quant × train mode × arch**
+still **serves answers while learning** under mid-stream label flips — and how
+expensive that is in storage.
+
+| Axis | Metrics | Meaning |
+|------|---------|---------|
+| Adaptation quality | SoftAcc, AdaptPct, Stability, Consistency | Track quality / recovery after phase A→B→A2 |
+| Duty-cycle availability | Availability, ZeroDowntime | InferMs / (InferMs+TrainMs) |
+| Cost | WeightBytes, HeapBytes, MobileScore | Model size + Score/MiB |
+
+### Pareto front
+
+Improving Score often costs RAM; boosting SoftAcc often costs Availability.
+The undominated edge of that tradeoff surface is the result — not a single
+winner column.
+
+---
+
+## Lucy / test41 formulas
+
+```
+SoftAcc      = 100 × (1 − |true_class_logit − 1| / 0.10)   (test41 SoftAcc)
+Availability = InferMs / (InferMs + TrainMs) × 100
+Score        = Throughput × Availability × SoftAcc / 10_000
+MobileScore  = Score / WeightMiB
+```
+
+Hard argmax Acc is still recorded (`avg_accuracy`) but **Score uses SoftAcc**.
+
+Mid-stream flip: phase **A** → **B** (`label = (label+5)%10`) → **A2**.
+
+---
 
 ## Network
 
+**cnn**
 ```
 input [B,1,28,28]
   → CNN2 (8 filters, k=3, s=1, p=1, ReLU)
@@ -12,23 +52,23 @@ input [B,1,28,28]
   → Dense → 10 logits
 ```
 
-Train split = 80% of official MNIST train; val = remaining 20% (every 5th index). Serve draws from val; train from the 80% pool.
-
-## Score (Lucy dense equation)
-
+**bicameral**
 ```
-Score = Throughput × Availability% × AvgAccuracy% / 10_000
+…same CNN stack…
+  → Dense (flat → 64)
+  → Parallel(Dense∥Dense, add)
+  → Dense → 10 logits
 ```
 
-Mid-stream flip: phase **A** (normal labels) → **B** (`label = (label+5)%10`) → **A2** (normal again).
+Backend: **SIMD only**. Train split = 80% of official MNIST train; val = 20%.
+
+---
 
 ## Run
 
 ```bash
 go run . -addr 0.0.0.0:8080
-# local:  http://127.0.0.1:8080
-# remote: http://<host-lan-ip>:8080
-# default -mode full = all dtypes × all packs/k-quants × all train modes
+# default -mode full = all dtypes × packs × modes × arches @ SIMD
 ```
 
 | Flag | Default | Meaning |
@@ -41,33 +81,24 @@ go run . -addr 0.0.0.0:8080
 | `-ckpt-sec` | `60` | save scores + inflight model every N seconds |
 | `-fresh` | off | ignore checkpoint and start clean at epoch 1 |
 
-**Default:** each permutation trains **one full epoch** over the 80% train split (all 48k examples once).  
-Re-run after the sweep finishes → **epoch N+1** (loads prior cell weights). Ctrl+C mid-epoch resumes at the saved train offset.
+**Default:** each permutation trains **one full epoch** over the 80% train split.  
+Re-run after the sweep finishes → **epoch N+1**. Ctrl+C mid-epoch resumes.
 
-### Checkpoint / resume
+### Train modes (Lucy / test41 suite @ SIMD)
 
-Every minute (configurable) tide writes:
+`sgd`, `step_sgd`, `tween`, `tween_chain`, `step_tween`, `step_tween_chain`
+× arches `cnn` \| `bicameral`.
 
-- `checkpoint/progress.json` — completed cells, Lucy scores, **best score / throughput / availability / accuracy**, inflight cell state  
-- `checkpoint/history.json` — full pulse timeline for the dashboard (refresh / other machines)  
-- `checkpoint/models/inflight/` — current cell weights (cnn1/cnn2/head `.bin`)  
-- `checkpoint/models/best_{score,throughput,availability,accuracy}/` — best raw models per axis  
-- `checkpoint/models/best_mobile_{score,throughput,availability,accuracy}/` — best **metric/MiB** (mobile)  
-- `checkpoint/models/<cell_id>/` — finished cell weights  
+**Removed:** `tween_head`, CPU-tiled twin modes, `*_simd` suffixes (everything is SIMD).
 
-Stop (Ctrl+C) and re-run the same command to resume from the next unfinished cell (or mid-cell inflight). Use `-fresh` to wipe resume state (delete `checkpoint/` manually if you want a clean slate on disk).
+`full` = all dtypes × all packs × all modes × both arches.  
+`smoke` = few dtypes/packs × all modes × both arches.  
+`kquant` = Q2_K…Q6_K × modes × arches.
 
-Dashboard loads **server history** on every poll — refresh or open from another machine and you still see the chart + can scrub back in time.
-
-### Train modes (Lucy suite)
-
-`sgd`, `step_sgd`, `tween`, `tween_chain`, `step_tween`, `step_tween_chain` (+ `_simd` each), plus `tween_head` baselines — crossed with dtypes/quants.
-
-`full` (default) = all 34 dtypes × all Welvet packs/k-quants × all train modes.  
-`smoke` = few dtypes/packs × all modes (quick check).  
-`kquant` = Q2_K…Q6_K × Lucy modes only.
+---
 
 ## Stack
 
-- **tide** — serve+train runner, Lucy metrics, live HTML pulse  
-- **Welvet** — native CNN2 / Dense, FormatNone dtypes, k-quants, SIMD backends (same training path as down-the-dem)
+- **tide** — serve+train runner, Lucy/test41 metrics, live HTML pulse  
+- **Welvet** — CNN2 / Dense / Parallel, FormatNone dtypes, k-quants, SIMD  
+- Measuring lineage: test41-w perm SoftAcc + duty-cycle Availability  
