@@ -1,7 +1,8 @@
 // live_mnist — 80/20 MNIST adaptation sweep via tide + Welvet.
 //
-// Default: each permutation trains one full epoch over the 80% train split.
-// Re-run after a finished sweep starts epoch N+1 (weights continue).
+// Default: each permutation trains a class-balanced 8000-example pass
+// (-train-n 0 for the full 80% split). Re-run after a finished sweep starts
+// epoch N+1 (weights continue).
 package main
 
 import (
@@ -26,7 +27,9 @@ import (
 
 func main() {
 	addr := flag.String("addr", "0.0.0.0:8080", "dashboard listen address (0.0.0.0 = all interfaces)")
-	mode := flag.String("mode", "full", "permutation set: full | smoke | kquant (default: full matrix)")
+	mode := flag.String("mode", "full", "permutation set: full | screen | smoke | kquant")
+	arches := flag.String("arches", "", "limit arches: comma list cnn,bicameral,tricameral (default: all in -mode)")
+	trainN := flag.Int("train-n", 8000, "train examples per cell, class-balanced (0 = all ~48000)")
 	dataDir := flag.String("data", "data", "MNIST cache directory")
 	ckptDir := flag.String("ckpt", "checkpoint", "progress + model checkpoint directory")
 	batch := flag.Int("batch", 4, "permutations per dashboard batch")
@@ -43,8 +46,7 @@ func main() {
 	fmt.Println(" modes: Lucy 6 (sgd/step/tween…) + Welvet credit (Split/FastProxy/Sparse/Mesh*…)")
 	fmt.Println(" Score = Throughput × Availability × SoftAcc / 10_000")
 	fmt.Println(" Availability = InferMs / (InferMs + TrainMs)")
-	fmt.Println(" Default: full dtype × quant × mode × arch matrix")
-	fmt.Println("          1 epoch over 80% train per permutation")
+	fmt.Println(" Default train-n=8000 class-balanced (not a full 48k epoch)")
 	fmt.Println("════════════════════════════════════════════════════════════")
 	fmt.Printf(" SIMD linked: %v\n", simd.Enabled())
 	fmt.Printf(" Dashboard:   %s\n", dashURLs(*addr))
@@ -57,20 +59,39 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Printf("  train=%d  val=%d  test=%d\n", len(split.Train), len(split.Val), len(split.Test))
-	fmt.Printf("  → each cell trains until all %d train examples are seen once\n\n", len(split.Train))
+	fullTrain := len(split.Train)
+	split.Train = mnist.TakeBalanced(split.Train, *trainN, 0x4D4E4953)
+	fmt.Printf("  train=%d", len(split.Train))
+	if len(split.Train) < fullTrain {
+		fmt.Printf("/%d class-balanced (-train-n %d; 0 = all)", fullTrain, *trainN)
+	}
+	fmt.Printf("  val=%d  test=%d\n", len(split.Val), len(split.Test))
+	fmt.Printf("  → each cell trains until all %d train examples are seen once (flips at 1/3 and 2/3)\n\n", len(split.Train))
 
 	var pcfg permute.Config
 	switch *mode {
 	case "full":
 		pcfg = permute.Full()
+	case "screen":
+		pcfg = permute.Screen()
 	case "kquant":
 		pcfg = permute.KQuant()
-	default:
+	case "smoke":
 		pcfg = permute.Smoke()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown -mode %q (full|screen|smoke|kquant)\n", *mode)
+		os.Exit(2)
+	}
+	if list := parseArches(*arches); len(list) > 0 {
+		pcfg.Arches = list
 	}
 	cells := permute.Expand(pcfg)
 	fmt.Printf(" Permutations: %d (batch size %d)\n", len(cells), *batch)
+	fmt.Printf(" Rough ETA:    %s  (from ~10 min/cell at 48k on this box, scaled by train-n)\n",
+		roughETA(len(cells), len(split.Train), fullTrain))
+	if *mode == "full" && (len(pcfg.Arches) != 1) {
+		fmt.Println(" Tip:          -mode screen  (Lucy 6 × cnn × all dtypes) or -arches cnn to cut the month down")
+	}
 
 	store := checkpoint.New(*ckptDir, *mode)
 	var resume *checkpoint.Progress
@@ -81,6 +102,12 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	if resume != nil && resume.Inflight != nil && resume.Inflight.TrainOffset > len(split.Train) {
+		fmt.Fprintf(os.Stderr, "inflight cell %s is at example %d but this run only has %d train examples.\n",
+			resume.Inflight.Cell.ID, resume.Inflight.TrainOffset, len(split.Train))
+		fmt.Fprintf(os.Stderr, "Pass -train-n 0 to finish it, or -fresh to drop inflight.\n")
+		os.Exit(2)
+	}
 	epoch, resume := checkpoint.PrepareEpoch(resume, cells)
 	if resume != nil {
 		done := checkpoint.DoneSet(resume)
@@ -89,6 +116,9 @@ func main() {
 			fmt.Printf(", inflight=%s @%d/%d", resume.Inflight.Cell.ID, resume.Inflight.TrainOffset, len(split.Train))
 		}
 		fmt.Println()
+		if len(split.Train) < fullTrain && len(done) > 0 {
+			fmt.Println("  note: finished cells may have used a longer epoch; new cells use -train-n. Scores mix two lengths.")
+		}
 		printBests("  checkpoint bests (raw)", resume.Best)
 		printMobile("  checkpoint bests (mobile = metric/MiB)", resume.BestMobile)
 	} else {
@@ -102,7 +132,7 @@ func main() {
 		Addr:     *addr,
 		Epoch:    epoch,
 		Task:     "MNIST",
-		Subtitle: "80/20 classification · mid-stream label flips A→B→A2 · SIMD",
+		Subtitle: fmt.Sprintf("%d train examples · mid-stream flips A→B→A2 · SIMD", len(split.Train)),
 	}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
@@ -178,6 +208,53 @@ func main() {
 	fmt.Printf("\nEpoch %d complete. Re-run `go run .` for epoch %d (weights continue).\n", epoch, epoch+1)
 	fmt.Println("Dashboard still serving — Ctrl+C to exit.")
 	<-ctx.Done()
+}
+
+func parseArches(s string) []permute.ArchKind {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	var out []permute.ArchKind
+	for _, p := range strings.Split(s, ",") {
+		p = strings.ToLower(strings.TrimSpace(p))
+		switch p {
+		case "":
+			continue
+		case "cnn", "single":
+			out = append(out, permute.ArchCNN)
+		case "bicameral", "bi":
+			out = append(out, permute.ArchBicameral)
+		case "tricameral", "tri":
+			out = append(out, permute.ArchTricameral)
+		default:
+			fmt.Fprintf(os.Stderr, "unknown arch %q (cnn|bicameral|tricameral)\n", p)
+			os.Exit(2)
+		}
+	}
+	return out
+}
+
+// roughETA scales ~10 min/cell at the full 80% split (measured on this machine's checkpoint).
+func roughETA(cells, trainN, fullN int) string {
+	if cells < 1 {
+		return "—"
+	}
+	if fullN < 1 {
+		fullN = 48000
+	}
+	if trainN < 1 {
+		trainN = fullN
+	}
+	sec := float64(cells) * 600 * float64(trainN) / float64(fullN)
+	switch {
+	case sec < 90:
+		return fmt.Sprintf("~%.0fs", sec)
+	case sec < 2*3600:
+		return fmt.Sprintf("~%.0f min", sec/60)
+	default:
+		return fmt.Sprintf("~%.1f days", sec/86400)
+	}
 }
 
 func printBests(title string, b pulse.Best) {

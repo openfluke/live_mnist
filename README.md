@@ -63,7 +63,7 @@ input [B,1,28,28]
   → Dense → 10 logits
 ```
 
-Backend: **SIMD only**. Train split = 80% of official MNIST train; val = 20%.
+Backend: **SIMD only**. Train split defaults to a **class-balanced 8000** of the 80% official train (pass `-train-n 0` for all ~48000). Val stays the full 20% for serve.
 
 ---
 
@@ -71,12 +71,25 @@ Backend: **SIMD only**. Train split = 80% of official MNIST train; val = 20%.
 
 ```bash
 go run . -addr 0.0.0.0:8080
-# default -mode full = all dtypes × packs × modes × arches @ SIMD
+# default: -mode full, -train-n 8000
 ```
+
+A **full** matrix is ~3700 cells. At a full 48k epoch that is on the order of **a month** on this box (~10 min/cell). Cut wall time with:
+
+| Lever | Flag | Effect |
+|-------|------|--------|
+| Shorter epoch | `-train-n 8000` (default) | ~6× faster per cell; A→B→A2 flips still at 1/3 and 2/3 |
+| CNN-only screen | `-mode screen` | Lucy 6 × cnn × all dtypes/quants (~324 cells) |
+| One arch | `-arches cnn` | skip bi/tri on whatever `-mode` you picked |
+| Tiny probe | `-mode smoke` | few dtypes × all modes × all arches |
+
+Resume still skips finished cell IDs. If an inflight cell is past the new `-train-n`, pass `-train-n 0` to finish it (or `-fresh`).
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `-mode` | `full` | `full` \| `smoke` \| `kquant` |
+| `-mode` | `full` | `full` \| `screen` \| `smoke` \| `kquant` |
+| `-train-n` | `8000` | class-balanced train examples per cell (`0` = all ~48000) |
+| `-arches` | all in mode | `cnn`, `bicameral`, `tricameral` (comma list) |
 | `-batch` | `4` | permutations per dashboard batch |
 | `-micro` | `8` | MNIST micro-batch |
 | `-data` | `data` | MNIST download cache |
@@ -84,7 +97,7 @@ go run . -addr 0.0.0.0:8080
 | `-ckpt-sec` | `60` | save scores + inflight model every N seconds |
 | `-fresh` | off | ignore checkpoint and start clean at epoch 1 |
 
-**Default:** each permutation trains **one full epoch** over the 80% train split.  
+**Default:** each permutation trains **one pass** over `-train-n` examples (class-balanced).  
 Re-run after the sweep finishes → **epoch N+1**. Ctrl+C mid-epoch resumes.
 
 ### Train modes (Lucy 6 + full Welvet named set @ SIMD)
@@ -98,9 +111,10 @@ Then every other `parallel.AllNamedTrainModes()` name (Split, Alt, HeadProxy, Fa
 
 **Removed:** `tween_head`, CPU-tiled twin modes, `*_simd` suffixes (everything is SIMD).
 
-`full` = all dtypes × all packs × all modes × both arches.  
-`smoke` = few dtypes/packs × all modes × both arches.  
-`kquant` = Q2_K…Q6_K × modes × arches.
+`full` = all dtypes × all packs × all modes × all arches.  
+`screen` = Lucy 6 × cnn × all dtypes/packs (first pass).  
+`smoke` = few dtypes/packs × all modes × all arches.  
+`kquant` = Q2_K…Q6_K × Lucy modes × arches.
 
 ---
 
