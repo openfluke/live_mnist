@@ -39,7 +39,8 @@ func main() {
 
 	fmt.Println("════════════════════════════════════════════════════════════")
 	fmt.Println(" live_mnist — tide × Welvet mid-stream adaptation @ SIMD")
-	fmt.Println(" arch: cnn | bicameral · modes: sgd/step/tween… (no tween_head)")
+	fmt.Println(" arch: cnn×1 | bicameral×2 | tricameral×3")
+	fmt.Println(" modes: Lucy 6 (sgd/step/tween…) + Welvet credit (Split/FastProxy/Sparse/Mesh*…)")
 	fmt.Println(" Score = Throughput × Availability × SoftAcc / 10_000")
 	fmt.Println(" Availability = InferMs / (InferMs + TrainMs)")
 	fmt.Println(" Default: full dtype × quant × mode × arch matrix")
@@ -95,7 +96,14 @@ func main() {
 	}
 
 	tr := pulse.New()
-	srv := &dash.Server{Tracker: tr, Cells: cells, Addr: *addr}
+	srv := &dash.Server{
+		Tracker:  tr,
+		Cells:    cells,
+		Addr:     *addr,
+		Epoch:    epoch,
+		Task:     "MNIST",
+		Subtitle: "80/20 classification · mid-stream label flips A→B→A2 · SIMD",
+	}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
 			fmt.Fprintln(os.Stderr, "dash:", err)
@@ -125,7 +133,8 @@ func main() {
 		srv.SignalStart()
 		fmt.Printf("Autostart — running epoch %d.\n", epoch)
 	} else {
-		fmt.Printf("Dashboard ready (epoch %d) — open it and press Start to begin training.\n", epoch)
+		fmt.Printf("Dashboard ready (epoch %d) — open it and press Start/Resume.\n", epoch)
+		fmt.Printf("  finished cells are skipped; new Welvet modes/arches only run the new IDs\n")
 		fmt.Printf("  (or re-run with -autostart)\n")
 		if err := srv.AwaitStart(ctx); err != nil {
 			fmt.Printf("\nStopped before start — checkpoint unchanged under %s.\n", *ckptDir)

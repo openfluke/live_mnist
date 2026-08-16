@@ -1,7 +1,8 @@
 # live_mnist
 
-Live mid-stream adaptation benchmark on **MNIST 80/20**, driven by [`tide`](../tide)
-on Welvet. Measuring aligned with
+Live mid-stream adaptation benchmark on **MNIST 80/20**. One host of the
+[`tide`](../tide) serve+train engine (any dataset that implements `runner.Dataset`
+works the same way). Measuring aligned with
 [`test41_w_sine_ada_perm`](../loom/arcagitesting/test41_w_sine_ada_perm).
 
 ---
@@ -45,7 +46,7 @@ Mid-stream flip: phase **A** → **B** (`label = (label+5)%10`) → **A2**.
 
 ## Network
 
-**cnn**
+**cnn** (single×1)
 ```
 input [B,1,28,28]
   → CNN2 (8 filters, k=3, s=1, p=1, ReLU)
@@ -54,11 +55,11 @@ input [B,1,28,28]
   → Dense → 10 logits
 ```
 
-**bicameral**
+**bicameral** (×2) / **tricameral** (×3)
 ```
 …same CNN stack…
   → Dense (flat → 64)
-  → Parallel(Dense∥Dense, add)
+  → Parallel(n×Dense, add)
   → Dense → 10 logits
 ```
 
@@ -86,10 +87,14 @@ go run . -addr 0.0.0.0:8080
 **Default:** each permutation trains **one full epoch** over the 80% train split.  
 Re-run after the sweep finishes → **epoch N+1**. Ctrl+C mid-epoch resumes.
 
-### Train modes (Lucy / test41 suite @ SIMD)
+### Train modes (Lucy 6 + full Welvet named set @ SIMD)
 
-`sgd`, `step_sgd`, `tween`, `tween_chain`, `step_tween`, `step_tween_chain`
-× arches `cnn` \| `bicameral`.
+Checkpoint-stable Lucy tokens: `sgd`, `step_sgd`, `tween`, `tween_chain`, `step_tween`, `step_tween_chain`.  
+Then every other `parallel.AllNamedTrainModes()` name (Split, Alt, HeadProxy, FastProxy, Linear, Sparse, Mesh*, …).
+
+× arches `cnn` (single×1) \| `bicameral` (×2) \| `tricameral` (×3).
+
+**Resume:** re-run `go run .` and press **Resume** on the dashboard. Finished cell IDs are skipped — new modes/arches only train the new IDs. Do not pass `-fresh` unless you want to wipe epoch 1.
 
 **Removed:** `tween_head`, CPU-tiled twin modes, `*_simd` suffixes (everything is SIMD).
 
