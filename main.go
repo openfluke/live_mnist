@@ -28,7 +28,7 @@ import (
 func main() {
 	addr := flag.String("addr", "0.0.0.0:8080", "dashboard listen address (0.0.0.0 = all interfaces)")
 	mode := flag.String("mode", "full", "permutation set: full | screen | smoke | kquant")
-	arches := flag.String("arches", "", "limit arches: comma list cnn,bicameral,tricameral (default: all in -mode)")
+	arches := flag.String("arches", "", "limit arches: comma list single,bicameral,tricameral (cnn still accepted)")
 	trainN := flag.Int("train-n", 8000, "train examples per cell, class-balanced (0 = all ~48000)")
 	dataDir := flag.String("data", "data", "MNIST cache directory")
 	ckptDir := flag.String("ckpt", "checkpoint", "progress + model checkpoint directory")
@@ -42,7 +42,7 @@ func main() {
 
 	fmt.Println("════════════════════════════════════════════════════════════")
 	fmt.Println(" live_mnist — tide × Welvet mid-stream adaptation @ SIMD")
-	fmt.Println(" arch: cnn×1 | bicameral×2 | tricameral×3")
+	fmt.Println(" arch: single×1 | bicameral×2 | tricameral×3")
 	fmt.Println(" modes: Lucy 6 (sgd/step/tween…) + Welvet credit (Split/FastProxy/Sparse/Mesh*…)")
 	fmt.Println(" Score = Throughput × Availability × SoftAcc / 10_000")
 	fmt.Println(" Availability = InferMs / (InferMs + TrainMs)")
@@ -90,7 +90,7 @@ func main() {
 	fmt.Printf(" Rough ETA:    %s  (from ~10 min/cell at 48k on this box, scaled by train-n)\n",
 		roughETA(len(cells), len(split.Train), fullTrain))
 	if *mode == "full" && (len(pcfg.Arches) != 1) {
-		fmt.Println(" Tip:          -mode screen  (Lucy 6 × cnn × all dtypes) or -arches cnn to cut the month down")
+		fmt.Println(" Tip:          -mode screen  (Lucy 6 × single × all dtypes) or -arches single to cut the month down")
 	}
 
 	store := checkpoint.New(*ckptDir, *mode)
@@ -222,13 +222,13 @@ func parseArches(s string) []permute.ArchKind {
 		case "":
 			continue
 		case "cnn", "single":
-			out = append(out, permute.ArchCNN)
+			out = append(out, permute.ArchSingle)
 		case "bicameral", "bi":
 			out = append(out, permute.ArchBicameral)
 		case "tricameral", "tri":
 			out = append(out, permute.ArchTricameral)
 		default:
-			fmt.Fprintf(os.Stderr, "unknown arch %q (cnn|bicameral|tricameral)\n", p)
+			fmt.Fprintf(os.Stderr, "unknown arch %q (single|bicameral|tricameral)\n", p)
 			os.Exit(2)
 		}
 	}
