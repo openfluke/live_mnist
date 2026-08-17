@@ -7,7 +7,10 @@ require (
 	github.com/openfluke/welvet v0.0.0
 )
 
-require github.com/openfluke/webgpu v1.0.4 // indirect
+require (
+	github.com/openfluke/webgpu v1.0.4 // indirect
+	github.com/phpdave11/gofpdf v1.4.3 // indirect
+)
 
 replace github.com/openfluke/tide => ../tide
 
